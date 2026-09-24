@@ -1,4 +1,6 @@
-Name:Sobar Danil Group:PO 25-Z Date:22.09.26
+Name: Sobar Danil 
+Group: PO 25-Z 
+Date: 22.09.26
 
 from dataclasses import asdict, dataclass, field
 import json
