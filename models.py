@@ -1,3 +1,7 @@
+Name: Sobar Danil 
+Group: PO 25-Z 
+Date: 24.09.26
+
 from dataclasses import dataclass, field
 
 
