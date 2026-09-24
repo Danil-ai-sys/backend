@@ -1,3 +1,5 @@
+Name:Sobar Danil Group:PO 25-Z Date:24.09.26
+
 import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
