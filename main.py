@@ -1,16 +1,27 @@
 Name: Sobar Danil 
 Group: PO 25-Z 
-Date: 24.09.26
+Date: 28.09.26
 
+import logging
 import os
 from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
 import storage
+from errors import ChatFull, MessageNotFound
 from models import Room, User
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 APP_NAME = os.getenv("APP_NAME", "kilc-chat")
 
@@ -19,6 +30,9 @@ rooms: dict[int, Room] = {}
 
 
 def seed() -> None:
+    users.clear()
+    rooms.clear()
+
     alice = User(id=1, name="Alice")
     bob = User(id=2, name="Bob")
     users[alice.id] = alice
@@ -33,11 +47,29 @@ def seed() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     seed()
-    storage.load()  # <- load() runs at startup
+    storage.load()
     yield
 
 
 app = FastAPI(title=APP_NAME, lifespan=lifespan)
+
+
+@app.exception_handler(MessageNotFound)
+def message_not_found_handler(
+    _request: Request, exc: MessageNotFound
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={"code": "message_not_found", "detail": str(exc)},
+    )
+
+
+@app.exception_handler(ChatFull)
+def chat_full_handler(_request: Request, exc: ChatFull) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={"code": "chat_full", "detail": str(exc)},
+    )
 
 
 class MessageCreate(BaseModel):
@@ -63,10 +95,11 @@ def list_messages(room_id: int | None = None):
 
 @app.get("/messages/{message_id}")
 def get_message(message_id: int):
-    message = storage.get(message_id)
-    if message is None:
-        raise HTTPException(404, "message not found")
-    return message
+    try:
+        return storage.get(message_id)
+    except MessageNotFound:
+        logger.info("Message lookup failed: id=%s", message_id)
+        raise
 
 
 @app.post("/messages", status_code=201)
@@ -75,31 +108,42 @@ def create_message(body: MessageCreate):
         raise HTTPException(404, "room not found")
     if body.author_id not in users:
         raise HTTPException(404, "author not found")
-    message = storage.create(body.room_id, body.author_id, body.text)
+
+    try:
+        message = storage.create(body.room_id, body.author_id, body.text)
+    except ChatFull:
+        logger.warning("Message creation rejected because the chat is full")
+        raise
+
     rooms[body.room_id].last_message_id = message.id
     return message
 
 
 @app.put("/messages/{message_id}")
 def replace_message(message_id: int, body: MessagePut):
-    message = storage.put(message_id, body.text, body.pinned)
-    if message is None:
-        raise HTTPException(404, "message not found")
-    return message
+    try:
+        return storage.put(message_id, body.text, body.pinned)
+    except MessageNotFound:
+        logger.info("Message replacement failed: id=%s", message_id)
+        raise
 
 
 @app.patch("/messages/{message_id}")
 def update_message(message_id: int, body: MessagePatch):
-    message = storage.patch(message_id, body.text, body.pinned)
-    if message is None:
-        raise HTTPException(404, "message not found")
-    return message
+    try:
+        return storage.patch(message_id, body.text, body.pinned)
+    except MessageNotFound:
+        logger.info("Message update failed: id=%s", message_id)
+        raise
 
 
 @app.delete("/messages/{message_id}", status_code=204)
 def delete_message(message_id: int):
-    if not storage.delete(message_id):
-        raise HTTPException(404, "message not found")
+    try:
+        storage.delete(message_id)
+    except MessageNotFound:
+        logger.info("Message deletion failed: id=%s", message_id)
+        raise
 
 
 if __name__ == "__main__":
