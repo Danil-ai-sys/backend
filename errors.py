@@ -1,3 +1,7 @@
+Name: Sobar Danil 
+Group: PO 25-Z 
+Date: 28.09.26
+
 class MessageNotFound(Exception):
     """Raised by the storage layer when a message does not exist."""
 
