@@ -1,11 +1,17 @@
 Name: Sobar Danil 
 Group: PO 25-Z 
-Date: 24.09.26
+Date: 28.09.26
 
 import json
+import logging
 from dataclasses import asdict
 from pathlib import Path
+
+from config import settings
+from errors import ChatFull, MessageNotFound
 from models import Message
+
+logger = logging.getLogger(__name__)
 
 DATA_FILE = Path(__file__).parent / "messages.json"
 
@@ -45,35 +51,46 @@ def list_all(room_id: int | None = None) -> list[Message]:
     return values
 
 
-def get(message_id: int) -> Message | None:
-    return _messages.get(message_id)
+def get(message_id: int) -> Message:
+    message = _messages.get(message_id)
+    if message is None:
+        raise MessageNotFound(message_id)
+    return message
 
 
 def create(room_id: int, author_id: int, text: str) -> Message:
     global _next_id
+
+    if len(_messages) >= settings.max_messages:
+        raise ChatFull(settings.max_messages)
+
     message = Message(id=_next_id, room_id=room_id, author_id=author_id, text=text)
     _messages[message.id] = message
     _next_id += 1
     save()
+    logger.info("Created message id=%s in room_id=%s", message.id, room_id)
+
+    if len(_messages) * 10 >= settings.max_messages * 9:
+        logger.warning(
+            "Chat is at %s/%s messages (90%% or more full)",
+            len(_messages),
+            settings.max_messages,
+        )
     return message
 
 
-def put(message_id: int, text: str, pinned: bool = False) -> Message | None:
-
-    message = _messages.get(message_id)
-    if message is None:
-        return None
+def put(message_id: int, text: str, pinned: bool = False) -> Message:
+    message = get(message_id)
     message.text = text
     message.pinned = pinned
     save()
     return message
 
 
-def patch(message_id: int, text: str | None = None, pinned: bool | None = None) -> Message | None:
-
-    message = _messages.get(message_id)
-    if message is None:
-        return None
+def patch(
+    message_id: int, text: str | None = None, pinned: bool | None = None
+) -> Message:
+    message = get(message_id)
     if text is not None:
         message.text = text
     if pinned is not None:
@@ -82,9 +99,7 @@ def patch(message_id: int, text: str | None = None, pinned: bool | None = None) 
     return message
 
 
-def delete(message_id: int) -> bool:
-    if message_id not in _messages:
-        return False
-    del _messages[message_id]
+def delete(message_id: int) -> None:
+    del _messages[get(message_id).id]
     save()
-    return True
+    logger.info("Deleted message id=%s", message_id)
